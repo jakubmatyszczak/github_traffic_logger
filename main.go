@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 type ClonesEntry struct
@@ -21,19 +22,43 @@ type JsonContents struct {
     Clones  []ClonesEntry `json:"clones"`
 }
 func main(){
-    if len(os.Args) < 2 {
-	fmt.Println("Too few arguments!")
-	fmt.Println("Syntax github_traffic_logger <repo_owner/repo_name> (optional)<csv_filepath> (optional)<gh_token_path>")
-	fmt.Println("Example: github_traffic_logger jakubmatyszczak/github_traffic_logger ~/log_path.csv ~/token")
-	log.Fatal(os.ErrInvalid)
+    csvFilePath := ""
+    ghTokenPath := ""
+    ghRepoOwner := ""
+
+    if len(os.Args) < 2{
+	log.Fatal("Not enought arguments!")
     }
-    ghRepoOwner := os.Args[1]
-    // csvFilePath := os.Args[2]
-    // ghTokenFile := os.Args[3]
-    
+    ghRepoOwner = os.Args[1]
+    for i := 2; i < len(os.Args)-1; i++ {
+	var arg string
+	arg = os.Args[i]
+	if arg[0:2] == "-c"{
+	    csvFilePath = os.Args[i+1]
+	    i += 1
+	}
+	if arg[0:2] == "-t"{
+	    ghTokenPath = os.Args[i+1]
+	    i += 1
+	}
+    }
+    fmt.Println("tokenpath: ", ghTokenPath)
+    fmt.Println("csvpath: ", csvFilePath)
+    fmt.Println("ghrepo: ", ghRepoOwner)
+
     cmd := "gh api   -H \"Accept: application/vnd.github+json\"   -H \"X-GitHub-Api-Version: 2022-11-28\"   /repos/" + ghRepoOwner + "/traffic/clones"
     exCmd := exec.Command("bash", "-c", cmd);
-    exCmd.Env = os.Environ();
+    if os.Getenv("GH_TOKEN") == "" && ghTokenPath == ""{
+	log.Fatal("GH_TOKEN env variable not set and path to token not specified!")
+    }
+    if _, err := os.Stat(ghTokenPath); err == nil {
+	token, err := exec.Command("bash", "-c", "cat " + ghTokenPath).Output()
+	if err != nil {
+	    log.Fatal(err)
+	}
+	os.Setenv("GH_TOKEN", string(token))
+	exCmd.Env = append(os.Environ())
+    }
     out, err := exCmd.Output()
     if err != nil {
 	log.Fatal("Error getting response from GitHub server. Ensure there are no syntax errors. ",
@@ -46,7 +71,16 @@ func main(){
 	log.Fatal(err)
     }
 
-    file, err := os.OpenFile("log.csv", os.O_CREATE | os.O_RDWR, 0644)
+    if csvFilePath == "" {
+	filename := strings.Split(ghRepoOwner, "/")[0] + "_" + strings.Split(ghRepoOwner, "/")[1]
+	userHomeDir, err := os.UserHomeDir()
+	if err != nil {
+	    log.Fatal(err)
+	}
+	csvFilePath = userHomeDir + "/" + filename + "_traffic.csv"
+	fmt.Println("Creating new file: " + csvFilePath)
+    }
+    file, err := os.OpenFile(csvFilePath, os.O_CREATE | os.O_RDWR, 0644)
     if err != nil{
 	log.Fatal(err)
     }
@@ -89,3 +123,5 @@ func main(){
     }
     fmt.Println("Succesfully wrote ", newEntires, "records to .csv file")
 }
+
+
