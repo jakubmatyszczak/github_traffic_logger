@@ -45,9 +45,19 @@ func main(){
     fmt.Println("tokenpath: ", ghTokenPath)
     fmt.Println("csvpath: ", csvFilePath)
     fmt.Println("ghrepo: ", ghRepoOwner)
+/*
+curl -L \
+  -H "Accept: application/vnd.github+json" \
+  -H "Authorization: Bearer <YOUR-TOKEN>" \
+  -H "X-GitHub-Api-Version: 2022-11-28" \
+  https://api.github.com/repos/OWNER/REPO/traffic/clones
+    */
+    cmdStr := "curl -L -H \"Accept: application/vnd.github+json\"  -H \"Authorization: Bearer "
+    cmdStr = cmdStr + token
+    cmdStr = cmdStr + "\" -H \"X-GitHub-Api-Version: 2022-11-28\""
+    cmdStr = cmdStr + "https://api.github.com/repos/" + ghRepoOwner + "/traffic/clones"
 
-    cmd := "gh api   -H \"Accept: application/vnd.github+json\"   -H \"X-GitHub-Api-Version: 2022-11-28\"   /repos/" + ghRepoOwner + "/traffic/clones"
-    exCmd := exec.Command("bash", "-c", cmd);
+    curl := exec.Command()
     if os.Getenv("GH_TOKEN") == "" && ghTokenPath == ""{
 	log.Fatal("GH_TOKEN env variable not set and path to token not specified!")
     }
@@ -59,6 +69,7 @@ func main(){
 	os.Setenv("GH_TOKEN", string(token))
 	exCmd.Env = append(os.Environ())
     }
+
     out, err := exCmd.Output()
     if err != nil {
 	log.Fatal("Error getting response from GitHub server. Ensure there are no syntax errors. ",
