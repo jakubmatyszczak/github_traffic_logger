@@ -4,9 +4,10 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -45,39 +46,36 @@ func main(){
     fmt.Println("tokenpath: ", ghTokenPath)
     fmt.Println("csvpath: ", csvFilePath)
     fmt.Println("ghrepo: ", ghRepoOwner)
-/*
-curl -L \
-  -H "Accept: application/vnd.github+json" \
-  -H "Authorization: Bearer <YOUR-TOKEN>" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  https://api.github.com/repos/OWNER/REPO/traffic/clones
-    */
-    cmdStr := "curl -L -H \"Accept: application/vnd.github+json\"  -H \"Authorization: Bearer "
-    cmdStr = cmdStr + token
-    cmdStr = cmdStr + "\" -H \"X-GitHub-Api-Version: 2022-11-28\""
-    cmdStr = cmdStr + "https://api.github.com/repos/" + ghRepoOwner + "/traffic/clones"
 
-    curl := exec.Command()
     if os.Getenv("GH_TOKEN") == "" && ghTokenPath == ""{
 	log.Fatal("GH_TOKEN env variable not set and path to token not specified!")
     }
+    var token string
     if _, err := os.Stat(ghTokenPath); err == nil {
-	token, err := exec.Command("bash", "-c", "cat " + ghTokenPath).Output()
+	tokenBytes, err := os.ReadFile(ghTokenPath)
+	token = string(tokenBytes)
+	token = token[0:len(token)-1]
 	if err != nil {
 	    log.Fatal(err)
 	}
-	os.Setenv("GH_TOKEN", string(token))
-	exCmd.Env = append(os.Environ())
     }
-
-    out, err := exCmd.Output()
+    req, err := http.NewRequest("GET", "https://api.github.com/repos/" + ghRepoOwner + "/traffic/clones", nil)
+    if err != nil{
+	log.Fatal("Could not create HTTP request!")
+    }
+    req.Header.Set("Accept", "application/vnd.github+json")
+    req.Header.Set("Authorization", "Bearer " + token)
+    req.Header.Set("X-Github-Api-Version", "2022-11-28")
+    response, err := http.DefaultClient.Do(req)
     if err != nil {
 	log.Fatal("Error getting response from GitHub server. Ensure there are no syntax errors. ",
-	"Command error: ",err)
+	"Error: ",err)
     }
-
+    defer response.Body.Close()
+    var httpOutput []byte
+    httpOutput, err = io.ReadAll(response.Body)
     jsonFile := JsonContents{}
-    err = json.Unmarshal(out, &jsonFile)
+    err = json.Unmarshal(httpOutput, &jsonFile)
     if err != nil {
 	log.Fatal(err)
     }
