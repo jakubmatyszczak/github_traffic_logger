@@ -137,10 +137,6 @@ func main(){
     if err != nil {
 	log.Fatal(err)
     }
-    if len(jsonClones.Clones) > len(jsonViews.Views){
-	log.Fatal("Number of entries in clones and views does not match!")
-    }
-
     if csvFilePath == "" {
 	csvFilePath,err = createCsv(ghRepoOwner)
 	if err != nil{
@@ -152,6 +148,7 @@ func main(){
 	log.Fatal(err)
     }
     defer file.Close()
+
     csvReader := csv.NewReader(file)
     lastRecord := getLastRecordFromCsv(*csvReader)
     var lastRecordTimestamp time.Time;
@@ -163,23 +160,56 @@ func main(){
 	lastRecordNo,_ = strconv.Atoi(lastRecord[0])
 	lastRecordTimestamp, err = time.Parse("2006-01-02 15:04:05 +0000 MST", lastRecord[1])
     }
+    var firstNewRecordTimestamp time.Time
+    var lastNewRecordTimestamp time.Time
+    if jsonClones.Clones[0].Timestamp.Before(jsonViews.Views[0].Timestamp) {
+	firstNewRecordTimestamp = jsonClones.Clones[0].Timestamp 
+    } else {
+	firstNewRecordTimestamp = jsonViews.Views[0].Timestamp
+    }
+    if jsonClones.Clones[len(jsonClones.Clones)-1].Timestamp.After(jsonViews.Views[len(jsonViews.Views)-1].Timestamp) {
+	lastNewRecordTimestamp = jsonClones.Clones[len(jsonClones.Clones)-1].Timestamp 
+    } else {
+	lastNewRecordTimestamp = jsonViews.Views[len(jsonViews.Views)-1].Timestamp
+    }
+    newRecords := int(lastNewRecordTimestamp.Sub(firstNewRecordTimestamp).Abs().Hours() / 24)
     csvWriter := csv.NewWriter(file);
     newEntires := 0
-    for i,value := range jsonClones.Clones{
-	if value.Timestamp.After(lastRecordTimestamp){
-	    var record []string
-	    record = append(record, fmt.Sprint(lastRecordNo + newEntires + 1))
-	    record = append(record, value.Timestamp.String())
-	    record = append(record, fmt.Sprint(value.Count))
-	    record = append(record, fmt.Sprint(value.Uniques))
-	    record = append(record, fmt.Sprint(jsonViews.Views[i].Count))
-	    record = append(record, fmt.Sprint(jsonViews.Views[i].Uniques))
-	    err = csvWriter.Write(record)
-	    if err != nil{
-		log.Fatal(err)
-	    }
-	    newEntires += 1
+    omittedClones := 0
+    omittedViews := 0
+    for i:=0; i < newRecords; i++ {
+	timestamp := firstNewRecordTimestamp.AddDate(0,0,i)
+	if timestamp.Compare(lastRecordTimestamp) <= 0{
+	    continue
 	}
+	var record []string
+	record = append(record, fmt.Sprint(lastRecordNo + newEntires + 1))
+        record = append(record, timestamp.String())
+
+	clonesIter := i - omittedClones
+	if jsonClones.Clones[clonesIter].Timestamp == timestamp{
+	    record = append(record, fmt.Sprint(jsonClones.Clones[clonesIter].Count))
+	    record = append(record, fmt.Sprint(jsonClones.Clones[clonesIter].Uniques))
+	} else {
+	    omittedClones += 1
+	    record = append(record, "0")
+	    record = append(record, "0")
+	}
+	viewsIter := i - omittedViews
+	if jsonViews.Views[viewsIter].Timestamp == timestamp{
+	    record = append(record, fmt.Sprint(jsonViews.Views[viewsIter].Count))
+	    record = append(record, fmt.Sprint(jsonViews.Views[viewsIter].Uniques))
+	} else {
+	    omittedViews += 1
+	    record = append(record, "0")
+	    record = append(record, "0")
+	}
+        
+	err = csvWriter.Write(record)
+	if err != nil{
+	    log.Fatal(err)
+	}
+	newEntires += 1
     }
     csvWriter.Flush()
     if newEntires == 0 {
