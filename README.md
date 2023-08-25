@@ -23,4 +23,13 @@ for example:
 ghtlogger jakubmatyszczak/github_traffic_logger -t ~/gh_token -c ~/Documents/ghtlogger.csv
 ```
 
+## Crontab
+Tool can be automated with cron. There is a script for automated crontab entry 
+generation, that can guide you thought the process. Simply run:
+```
+./create_crontab_entry.sh
+```
+and follow the instructions.
+
+
 
