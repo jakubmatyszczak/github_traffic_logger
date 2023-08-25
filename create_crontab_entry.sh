@@ -19,6 +19,7 @@ read -r -p "Is that correct? [y/N] " response
 
 if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]
 then
+   [ -f "$path/ghtlogger" ] || (echo "No ghtlogger found. Building..."; cd $path; go build ghtlogger.go)
    echo "Adding crontab entry..."
    (crontab -l; echo "$crontab_entry $cmd") | crontab -
    echo "Done"
