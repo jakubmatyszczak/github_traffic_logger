@@ -8,19 +8,88 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
-type ClonesEntry struct
+type TrafficEntry struct
 {
     Timestamp time.Time `json:"timestamp"`
     Count     int       `json:"count"` 
     Uniques   int       `json:"uniques"`
 }
-type JsonContents struct {
+type JsonClones struct {
     Count   int `json:"count"`
     Uniques int `json:"uniques"`
-    Clones  []ClonesEntry `json:"clones"`
+    Clones  []TrafficEntry `json:"clones"`
+}
+type JsonViews struct {
+    Count   int `json:"count"`
+    Uniques int `json:"uniques"`
+    Views []TrafficEntry `json:"views"`
+}
+func getToken(filePath string) (string, error) {
+    if os.Getenv("GH_TOKEN") == "" && filePath == ""{
+	log.Fatal("GH_TOKEN env variable not set and path to token not specified!")
+    }
+    var err error
+    if _, err := os.Stat(filePath); err == nil {
+	tokenBytes, err := os.ReadFile(filePath)
+	if err != nil {
+	    return "", err
+	}
+	token := string(tokenBytes)
+	if token[len(token) - 1:] == "\n" {
+	    token = token[0:len(token)-1]
+	}
+	return token, nil
+    }
+    return "", err
+}
+func callGhApi(repo string, trafficTarget string, token string) ([]byte, error){
+    url := "https://api.github.com/repos/" + repo + "/traffic/" + trafficTarget
+    req, err := http.NewRequest("GET", url, nil)
+    if err != nil{
+	return nil, err
+    }
+    req.Header.Set("Accept", "application/vnd.github+json")
+    req.Header.Set("Authorization", "Bearer " + token)
+    req.Header.Set("X-Github-Api-Version", "2022-11-28")
+    response, err := http.DefaultClient.Do(req)
+    if err != nil {
+	return nil, err
+    }
+    defer response.Body.Close()
+    httpOutput, err := io.ReadAll(response.Body)
+    if err != nil {
+	return nil, err
+    }
+    return httpOutput, nil
+}
+
+func createCsv(target string) (string,error) {
+    owner :=  strings.Split(target, "/")[0]
+    repo := strings.Split(target, "/")[1]
+    userHomeDir, err := os.UserHomeDir()
+    if err != nil {
+	return "", err
+    }
+    csvPath := userHomeDir + "/" + owner + "_" + repo + "_traffic.csv"
+    return csvPath, nil
+}
+func getLastRecordFromCsv(reader csv.Reader) []string {
+    var lastRecord  []string 
+    for {
+	record, err := reader.Read()
+	if(err != nil){
+	    break;
+	}
+	lastRecord = record;
+    }
+    if len(lastRecord) == 0{
+	return nil
+    }
+    return lastRecord
 }
 func main(){
     csvFilePath := ""
@@ -47,76 +116,64 @@ func main(){
     fmt.Println("csvpath: ", csvFilePath)
     fmt.Println("ghrepo: ", ghRepoOwner)
 
-    if os.Getenv("GH_TOKEN") == "" && ghTokenPath == ""{
-	log.Fatal("GH_TOKEN env variable not set and path to token not specified!")
-    }
-    var token string
-    if _, err := os.Stat(ghTokenPath); err == nil {
-	tokenBytes, err := os.ReadFile(ghTokenPath)
-	token = string(tokenBytes)
-	token = token[0:len(token)-1]
-	if err != nil {
-	    log.Fatal(err)
-	}
-    }
-    req, err := http.NewRequest("GET", "https://api.github.com/repos/" + ghRepoOwner + "/traffic/clones", nil)
+    token, err := getToken(ghTokenPath)
     if err != nil{
-	log.Fatal("Could not create HTTP request!")
+	log.Fatal("Could not get token, neither from ENV for from file: ", ghTokenPath)
     }
-    req.Header.Set("Accept", "application/vnd.github+json")
-    req.Header.Set("Authorization", "Bearer " + token)
-    req.Header.Set("X-Github-Api-Version", "2022-11-28")
-    response, err := http.DefaultClient.Do(req)
-    if err != nil {
-	log.Fatal("Error getting response from GitHub server. Ensure there are no syntax errors. ",
-	"Error: ",err)
+
+    httpOutput, err := callGhApi(ghRepoOwner, "clones", token)
+    if err != nil{
+	log.Fatal(err)
     }
-    defer response.Body.Close()
-    var httpOutput []byte
-    httpOutput, err = io.ReadAll(response.Body)
-    jsonFile := JsonContents{}
-    err = json.Unmarshal(httpOutput, &jsonFile)
+    jsonClones := JsonClones{}
+    err = json.Unmarshal(httpOutput, &jsonClones)
     if err != nil {
 	log.Fatal(err)
     }
 
+    httpOutput, err = callGhApi(ghRepoOwner, "views", token)
+    jsonViews := JsonViews{}
+    err = json.Unmarshal(httpOutput, &jsonViews)
+    if err != nil {
+	log.Fatal(err)
+    }
+    if len(jsonClones.Clones) > len(jsonViews.Views){
+	log.Fatal("Number of entries in clones and views does not match!")
+    }
+
     if csvFilePath == "" {
-	filename := strings.Split(ghRepoOwner, "/")[0] + "_" + strings.Split(ghRepoOwner, "/")[1]
-	userHomeDir, err := os.UserHomeDir()
-	if err != nil {
+	csvFilePath,err = createCsv(ghRepoOwner)
+	if err != nil{
 	    log.Fatal(err)
 	}
-	csvFilePath = userHomeDir + "/" + filename + "_traffic.csv"
-	fmt.Println("Creating new file: " + csvFilePath)
     }
     file, err := os.OpenFile(csvFilePath, os.O_CREATE | os.O_RDWR, 0644)
     if err != nil{
 	log.Fatal(err)
     }
+    defer file.Close()
     csvReader := csv.NewReader(file)
-    var lastRecord  []string 
-    for {
-	record, err := csvReader.Read()
-	if(err != nil){
-	    break;
-	}
-	lastRecord = record;
+    lastRecord := getLastRecordFromCsv(*csvReader)
+    var lastRecordTimestamp time.Time;
+    var lastRecordNo int
+    if lastRecord == nil{
+	fmt.Println("No records found. Createing header")
+	file.WriteString("No, Date, Clones, Unique Clones, Views, Unique Views\n")
+    } else {
+	lastRecordNo,_ = strconv.Atoi(lastRecord[0])
+	lastRecordTimestamp, err = time.Parse("2006-01-02 15:04:05 +0000 MST", lastRecord[1])
     }
     csvWriter := csv.NewWriter(file);
-    var lastRecordTimestamp time.Time;
-    if len(lastRecord) > 0{
-	lastRecordTimestamp, err = time.Parse("2006-01-02 15:04:05 +0000 MST", lastRecord[0])
-    } else{
-	fmt.Println("No records found. Createing header")
-	file.WriteString("Date, Clones, Uniques\n")
-    }
     newEntires := 0
-    for _,value := range jsonFile.Clones{
+    for i,value := range jsonClones.Clones{
 	if value.Timestamp.After(lastRecordTimestamp){
 	    var record []string
+	    record = append(record, fmt.Sprint(lastRecordNo + newEntires + 1))
 	    record = append(record, value.Timestamp.String())
 	    record = append(record, fmt.Sprint(value.Count))
 	    record = append(record, fmt.Sprint(value.Uniques))
+	    record = append(record, fmt.Sprint(jsonViews.Views[i].Count))
+	    record = append(record, fmt.Sprint(jsonViews.Views[i].Uniques))
 	    err = csvWriter.Write(record)
 	    if err != nil{
 		log.Fatal(err)
@@ -125,7 +182,6 @@ func main(){
 	}
     }
     csvWriter.Flush()
-    defer file.Close()
     if newEntires == 0 {
 	fmt.Println("No new records to add.")
 	return
